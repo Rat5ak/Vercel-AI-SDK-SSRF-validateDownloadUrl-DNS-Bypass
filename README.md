@@ -1,12 +1,18 @@
 ```
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- █                                                                     █
- █   AI SDK SSRF: validateDownloadUrl DNS Resolution Bypass            █
- █                                                                     █
- █   Full-Read Server-Side Request Forgery                             █
- █   No rebinding. Just a domain with an A record.                     █
- █                                                                     █
- ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                    _____  _____ _____  ______
+                   / ____|/ ____|  __ \|  ____|
+                  | (___ | (___ | |__) | |__
+                   \___ \ \___ \|  _  /|  __|
+                   ____) |____) | | \ \| |
+                  |_____/|_____/|_| \_\_|    BYPASS
+
+          AI SDK // validateDownloadUrl DNS Resolution Bypass
+          Full-Read Server-Side Request Forgery
+          No rebinding. Just a domain with an A record.
+
+                  +-+-+-+-+-+-+
+                  |R|a|t|5|a|k|
+                  +-+-+-+-+-+-+
 ```
 
 ## tl;dr
